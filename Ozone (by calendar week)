@@ -1,0 +1,613 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import statistics as stats
+import scipy.stats as st
+import scipy.io as sio
+import matplotlib.dates as mdates
+from matplotlib.dates import DateFormatter
+import seaborn as sns
+import statsmodels.stats.multicomp as multi
+import matplotlib.dates as md
+import datetime
+from math import sqrt
+import plotly.graph_objects as go
+%matplotlib inline
+from scipy.stats import iqr
+from statistics import median 
+from math import sin, cos, sqrt, atan2, radians
+from matplotlib.ticker import (AutoMinorLocator, MultipleLocator)
+
+#Reading file with all the states name
+states = pd.read_csv("/Users/Bujin/Downloads/States.csv")
+
+#Reading dates
+dateparse = lambda dates: [pd.datetime.strptime(d, '%Y-%m-%d') for d in dates]
+
+#Defining output
+
+OT=pd.DataFrame()
+
+#Calling each state file
+df=pd.DataFrame()
+for i in range (0,len(states['state'].dropna())):
+    Data = pd.read_csv("/Users/Bujin/Downloads/O3/"+str(states['state'][i])+" Ozone.csv",parse_dates=['Date'], date_parser=dateparse)
+    OT=pd.concat([OT,Data],axis=0,sort=False)
+OT.to_csv(r"/Users/Bujin/Downloads/Historical O3.csv", index = False)
+
+
+#Defining output
+DF=pd.DataFrame()
+Slope=pd.DataFrame()
+OT=pd.DataFrame()
+adjusted=[]
+idw=[]
+total_mon=0
+DF5=pd.DataFrame()
+Slope5=pd.DataFrame()
+OT5=pd.DataFrame()
+adjusted5=[]
+idw5=[]
+lastday=2
+twoweeks=16
+length=125
+totallength=191
+
+#Calling each state file
+
+Data = pd.read_csv("/Users/Bujin/Downloads/Historical O3.csv",parse_dates=['Date'], date_parser=dateparse)
+    
+a=[x for x in  list(set(Data['ID'])) if pd.notnull(x)] #each unique monitors in each state
+total_mon=total_mon+len(a) #Counting total monitors
+
+    #Defining output
+df=pd.DataFrame()
+slope1=pd.DataFrame()
+ot=pd.DataFrame()
+df5=pd.DataFrame()
+slope15=pd.DataFrame()
+ot5=pd.DataFrame()
+
+    
+    #for each station calculate D value   
+for iii in range(0,len(a)):
+       monitor=Data[Data['ID']==a[iii]]
+       
+       
+       #Defining as variables
+       site=list(monitor['Site'])[0]     
+       state=list(monitor['State'])[0] 
+       idd=list(monitor['ID'])[0]
+       county=list(monitor['County'])[0]
+       lon=(list(monitor['Longitude'])[0])
+       lat=(list(monitor['Latitude'])[0])
+       weeknum=0
+    
+       #Defining output
+       List10=[] 
+       slope=[]  
+       List5=[] 
+       slope5=[]  
+
+   
+       #Starting filters
+       
+       #Days pre and post covid
+
+       whole=monitor[monitor['Date']<pd.to_datetime('2020-09-'+str(lastday))] ##Change this date (add 7 days each week)
+       twentytwenty=pd.concat([whole['Date'],whole['2020']],axis=1,sort=False)
+       twentytwenty=twentytwenty.dropna()
+       pre=twentytwenty[twentytwenty['Date']<pd.to_datetime('2020-03-19')]
+       post=twentytwenty[twentytwenty['Date']>=pd.to_datetime('2020-03-19')]
+
+       #Number of days for adjusting
+       adjusting=monitor[monitor['Date']<pd.to_datetime('2020-09-'+str(twoweeks))] ## Change this date (add 7 days each week)
+
+       #dropping years if it has incomplete data
+       drop=adjusting.drop(['2020'],axis=1)
+       drop=drop.dropna(thresh=0.75*len(adjusting), axis=1)
+       
+       #checking if it has 2 years out of last 3 years
+       Iqr=pd.concat([adjusting['2019'],adjusting['2018'],adjusting['2017']],axis=1,sort=False)
+       Iqr = Iqr.dropna(thresh=0.75*len(Iqr), axis=1)
+       print(whole)
+       
+       start='2020-01-01'
+       
+       #Using monitors that have enough data
+       if len(drop.columns)>=10 and len(post)>=length and len(adjusting)>=totallength and len(pre)>=59 and len(Iqr.columns)>=2:   ##Change this (add 5 days on post and adjusting each week)
+                                        
+        for j in range(0,len(whole),7): # Week by week
+            
+           #Start and end date for each week
+          start_d = pd.to_datetime(start) + datetime.timedelta(j)
+          end_d = start_d + datetime.timedelta(7)
+         
+          week=monitor[monitor['Date']>=start_d]
+          week=week[week['Date']<end_d]
+          if len(week)>0: 
+           #Week 
+           twenty=pd.DataFrame(week["2020"])
+           weeknum=weeknum+1 #Week #
+           
+           #Month (for adjusting)
+           end_date = list(week['Date'])[0] + datetime.timedelta(days=21) # +2 weeks
+           start_date = list(week['Date'])[0] - datetime.timedelta(days=14) # -2 weeks
+
+        
+           # First 2 weeks of the year, add december data from previous year
+           if pd.to_datetime('2020-01-01')== list(week['Date'])[0] :
+               half=monitor[monitor["Date"]>='2020-12-18']
+               month=monitor[monitor["Date"]>='2020-01-01']
+               month=month[month['Date']<'2020-01-22']
+               half.rename(columns={"2020": "2009", "2019": "2020","2018":"2019","2017":"2018","2016":"2017","2015":"2016","2014":"2015","2013":"2014","2012":"2013","2011":"2012","2010":"2011","2009":'2010'}, inplace=True)
+               month = pd.concat((month, half), axis=0)
+               month=month.drop(['2009'],axis=1)
+           elif list(week['Date'])[0]==pd.to_datetime('2020-01-08'):
+               half=monitor[monitor["Date"]>'2020-12-24']
+               month=monitor[monitor["Date"]>='2020-01-01']
+               month=month[month['Date']<'2020-01-29'] 
+               half.rename(columns={"2020": "2009", "2019": "2020","2018":"2019","2017":"2018","2016":"2017","2015":"2016","2014":"2015","2013":"2014","2012":"2013","2011":"2012","2010":"2011",'2009':'2010'}, inplace=True)
+               month = pd.concat((month, half), axis=0)
+               month=month.drop(['2009'],axis=1)
+           else:
+               month=monitor[monitor["Date"]>=start_date]
+               month=month[month["Date"]<end_date]
+               month=month.drop(['2009'],axis=1)
+        
+           #if len(month.columns)==19:
+               #month=month.drop(['2009'],axis=1)
+           
+           Mnth=month.drop(['2020'], axis=1)
+           
+           #Change the 2020 data to only that particular week
+           month["2020"]=twenty
+           
+           #Dropping columns to get only historical data
+           months=month.drop(['2020'],axis=1)
+           months=month.drop(['Site'],axis=1)
+           months=months.drop(['State'],axis=1)
+           months=months.drop(['Longitude'],axis=1)          
+           months=months.drop(['Latitude'],axis=1)
+           months=months.drop(['Date'],axis=1)
+           months=months.drop(['ID'],axis=1)
+           months=months.drop(['County'],axis=1)
+           Iqr=pd.concat([adjusting['2019'],adjusting['2018'],adjusting['2017']],axis=1,sort=False)
+           Iqr = Iqr.dropna(thresh=0.75*len(Iqr), axis=1)
+           five=months
+           five=five.drop(['2010'],axis=1)
+           five=five.drop(['2011'],axis=1)
+           five=five.drop(['2012'],axis=1)
+           five=five.drop(['2013'],axis=1)
+           five=five.drop(['2014'],axis=1)           
+
+
+
+           #Filtering data, using years that have enough data
+           historical=months.dropna(thresh=0.75*len(months),axis=1)
+           #historical=months.dropna(axis=1,how='all')
+           histfive=five.dropna(thresh=0.75*len(five),axis=1)
+           #Finding median for each year
+           medians=np.nanmedian(historical,axis=0)
+           fivemed=np.nanmedian(histfive,axis=0)
+           #Finding iqr
+           IQR_melt = pd.melt(month.reset_index(), id_vars=['index'], value_vars=Iqr.columns)
+           IQR_melt=IQR_melt.dropna()
+           IQR_melt.columns = ['index', 'year', 'value']
+           
+           #Finding slope of historical data
+           hist_slope=pd.DataFrame({"x":pd.to_numeric(historical.columns),"y":np.array(medians)})
+           x=hist_slope["x"]
+           y=hist_slope["y"]
+           five_slope=pd.DataFrame({"x":pd.to_numeric(histfive.columns),"y":np.array(fivemed)})
+           x5=five_slope["x"]
+           y5=five_slope["y"]
+
+
+           #Finding historical median
+           
+           Historical_melt = pd.melt(month.reset_index(), id_vars=['index'], value_vars=historical.columns)
+           Historical_melt.columns = ['index', 'year', 'value']
+ 
+           five_melt = pd.melt(month.reset_index(), id_vars=['index'], value_vars=histfive.columns)
+           five_melt.columns = ['index', 'year', 'value']
+
+
+            # Will get a slope if it has more than 8 years of data
+           if len(historical.columns)>=8:
+                  
+                  #10 year median 
+                  Med=np.nanmedian(Historical_melt['value'])  
+                
+                  #Finding historical slope and r2 value
+                  trend, intercept, r_value, p_value, std_err = st.linregress(x,y)
+                  
+                  #Adjusting historical median
+                  adjusted_med =  trend * (len(historical.columns)+1)/2 + Med
+
+                  #Calculating D value 
+                  D_value=(np.nanmedian(month['2020'])-adjusted_med)/iqr(IQR_melt['value'])  
+                
+                  #Appending for output
+                  List10.append([D_value,np.nanmedian(month['2020']),Med,adjusted_med,trend,r_value**2,("Week "+str(weeknum)),state,idd,county,lat,lon])
+                  
+                  #Appending for idw
+                  adjusted.append([idd,radians(lat),radians(lon),trend,"Week "+str(weeknum)])
+                  slope.append(trend)
+                  
+                  
+           else:
+
+                  idw.append([idd,radians(lat),radians(lon)])
+                
+           if len(histfive.columns)>=4:
+                  
+                  #10 year median 
+                  Med5=np.nanmedian(five_melt['value'])  
+                
+                  #Finding historical slope and r2 value
+                  trend5, intercept, r_value5, p_value, std_err = st.linregress(x5,y5)
+                  
+                  #Adjusting historical median
+                  adjusted_med5 =  trend5 * (len(histfive.columns)+1)/2 + Med5
+
+                  #Calculating D value 
+                  D_value5=(np.nanmedian(month['2020'])-adjusted_med5)/iqr(IQR_melt['value'])  
+                
+                  #Appending for output
+                  List5.append([D_value5,np.nanmedian(month['2020']),Med5,adjusted_med5,trend5,r_value5**2,("Week "+str(weeknum)),state,idd,county,lat,lon])
+                  
+                  #Appending for idw
+                  adjusted5.append([idd,radians(lat),radians(lon),trend5,"Week "+str(weeknum)])
+                  slope5.append(trend5)
+                  
+                  
+           else:
+
+                  idw5.append([idd,radians(lat),radians(lon)])
+
+                  
+                
+        slope=pd.DataFrame(slope)
+        slope5=pd.DataFrame(slope5)
+
+        
+        #Preparing for idw
+        
+        if slope.size>0:
+           slope.columns=[str(idd)]
+        if slope5.size>0:
+           slope5.columns=[str(idd)]
+
+         
+        #Appending if it has 8 years of data
+        if len(historical.columns)>=8:
+          ot=pd.concat([ot,monitor],axis=0,sort=False)
+        slope1=pd.concat([slope1,slope],axis=1,sort=False)   
+        List10=pd.DataFrame(List10)
+        df=pd.concat([df, List10], axis=0, sort=False)      
+        if len(histfive.columns)>=4:
+          ot5=pd.concat([ot5,monitor],axis=0,sort=False)
+        slope15=pd.concat([slope15,slope5],axis=1,sort=False)   
+        List5=pd.DataFrame(List5)
+        df5=pd.concat([df5, List5], axis=0, sort=False)      
+
+
+    #Concating for output
+       
+OT=pd.concat([OT,ot],axis=0,sort=False)
+DF=pd.concat([DF, df], axis=0, sort=False)
+Slope=pd.concat([Slope,slope1],axis=1,sort=False)
+OT5=pd.concat([OT5,ot5],axis=0,sort=False)
+DF5=pd.concat([DF5, df5], axis=0, sort=False)
+Slope5=pd.concat([Slope5,slope15],axis=1,sort=False)
+
+#Starting IDW
+k1=pd.DataFrame(idw)
+k1=k1.drop_duplicates()
+k1.columns=['ID','Latitude','Longitude']
+k1=k1.reset_index(drop=True)
+IDW= list(k1['ID'])
+
+k2=pd.DataFrame(adjusted)
+k2.columns=['ID','Latitude','Longitude','Slope','Week']
+k2=k2.drop(['Slope'],axis=1)
+k2=k2.drop(['Week'],axis=1)
+k2=k2.drop_duplicates()
+adjusted=pd.DataFrame(adjusted)
+adjusted.columns=['ID','Latitude','Longitude','Slope','Week']
+k2.dropna()
+k2=k2.drop_duplicates()
+
+#IDW with nearest stations in 50km
+from sklearn.neighbors import DistanceMetric
+dist = DistanceMetric.get_metric('haversine')
+distance=pd.DataFrame(dist.pairwise(k2[['Latitude','Longitude']].to_numpy(), k1[['Latitude','Longitude']].to_numpy())*6373,columns=k1["ID"], index=k2["ID"])
+
+#IDW
+Slope1=pd.DataFrame()
+w=[]
+
+for i in range (0, len(IDW)):
+    
+    monitor=IDW[i]
+    s=distance[monitor]
+    
+    #find 3 nearest monitors in 50 km
+    nearest=s[s<50]
+    nearest=nearest[nearest>0]
+    nearest=nearest.sort_values(ascending=True)
+    nearest=nearest[:3]
+    idw=pd.DataFrame()
+    
+    #If there are monitors
+    if len(nearest)!= 0:
+        n=0
+        
+        o=list(nearest)
+        
+        #For each of the nearest monitors finding slope and distance:
+        for j in range (0,len(nearest)):
+            
+            nearest_mon=nearest.index[j]
+            nearest_slope=list(Slope[str(nearest_mon)])      
+            nearest_slope.append(1/nearest.iloc[j])
+            nearest_slope=pd.DataFrame(nearest_slope)
+            nearest_slope.columns=[n]
+            idw=pd.concat([idw,nearest_slope],axis=1,sort=False)
+            n=n+1
+            
+            length=len(list(idw[0]))
+            idw_df=pd.DataFrame()
+            df=pd.DataFrame()
+            
+            #Dataframing slope for nearest monitor and inverse distance to that monitor
+            for l in range (0,len(idw.columns)):
+                 t=[]      
+                 for m in range (0,length-1):
+
+                         t.append([list(idw[l])[m]*list(idw[l])[length-1],list(idw[l])[length-1]])
+                       #  print(list(idw[l])[m])
+                 t=pd.DataFrame(t)
+
+                 df=pd.concat([df,t],axis=1,sort=False) 
+                 df=pd.DataFrame(df)
+                 
+
+        idw_df=pd.concat([idw_df,df],axis=1,sort=False)
+        idw_df=idw_df.transpose()
+
+        slp=[]
+        
+        #Aggregating nearest monitor slopes and distance 
+        for z in range(0,len(idw_df.columns)):
+                row=list(idw_df[z])
+                nom=0
+                denom=0
+                for y in range (0,len(row)-1,2):
+                    if pd.notnull(row[y]):
+                     nom=nom+row[y]
+                     
+                     denom=denom+row[y+1]
+
+                if denom!=0:
+                 frac=nom/denom
+                 slp.append(frac)
+        slp=pd.DataFrame(slp)
+        slp.columns=[monitor]
+
+        #Output 
+        Slope1=pd.concat([Slope1,slp],axis=1,sort=False)
+            
+
+
+
+
+#Finding D value from IDW
+
+#Reading file with all the states name
+states = pd.read_csv("/Users/Bujin/Downloads/States.csv")
+
+#Reading dates
+dateparse = lambda dates: [pd.datetime.strptime(d, '%Y-%m-%d') for d in dates]
+
+#Defining output
+DF1=pd.DataFrame()
+Slope2=pd.DataFrame()
+OT1=pd.DataFrame()
+adjusted=[]
+idw=[]
+
+
+#Calling each state file
+
+Data = pd.read_csv("/Users/Bujin/Downloads/Historical O3.csv",parse_dates=['Date'], date_parser=dateparse)
+
+
+a=set(Data['ID']).intersection(Slope1.columns) #Taking the intersection of IDW monitors and all monitors
+a=list(a)
+
+    #Defining output
+df=pd.DataFrame()
+slope1=pd.DataFrame()
+ot=pd.DataFrame()
+    
+    #for each station calculate D value   
+for iii in range(0,len(a)):
+       monitor=Data[Data['ID']==a[iii]]
+       
+       #Defining as variables
+       site=list(monitor['Site'])[1]        
+       state=list(monitor['State'])[1] 
+       idd=list(monitor['ID'])[1]
+       county=list(monitor['County'])[1]
+       lon=(list(monitor['Longitude'])[1])
+       lat=(list(monitor['Latitude'])[1])
+       weeknum=0
+    
+       #Defining output
+       List10=[] 
+       slope=[]  
+    
+       #Starting filters
+       
+
+       whole=monitor[monitor['Date']<pd.to_datetime('2020-09-'+str(lastday))] ##Change this date (add 7 days each week)
+       twentytwenty=pd.concat([whole['Date'],whole['2020']],axis=1,sort=False)
+       twentytwenty=twentytwenty.dropna()
+       pre=twentytwenty[twentytwenty['Date']<pd.to_datetime('2020-03-19')]
+       post=twentytwenty[twentytwenty['Date']>=pd.to_datetime('2020-03-19')]
+
+
+       #Number of days for adjusting
+       adjusting=monitor[monitor['Date']<pd.to_datetime('2020-09-'+str(twoweeks))] ## Change this date (add 7 days each week)
+
+       #dropping years if it has incomplete data
+       drop=adjusting.drop(['2020'],axis=1)
+       drop=drop.dropna(thresh=0.75*len(adjusting), axis=1)
+       
+       #checking if it has 2 years out of last 3 years
+       Iqr=pd.concat([adjusting['2019'],adjusting['2018'],adjusting['2017']],axis=1,sort=False)
+       Iqr = Iqr.dropna(thresh=0.75*len(Iqr), axis=1)
+       
+       
+       
+       start='2020-01-01'
+       
+       #Using monitors that have enough data
+       if len(drop.columns)>=10 and len(post)>=length and len(adjusting)>=totallength and len(pre)>=59 and len(Iqr.columns)>=2:   ##Change this (add 5 days on post and adjusting each week)
+                                    
+        for j in range(0,len(whole),7): # Week by week
+            
+           #Start and end date for each week
+         start_d = pd.to_datetime(start) + datetime.timedelta(j)
+         end_d = start_d + datetime.timedelta(7)
+         
+         week=monitor[monitor['Date']>=start_d]
+         week=week[week['Date']<end_d]
+            
+           #Week 
+         twenty=pd.DataFrame(week["2020"])
+         weeknum=weeknum+1 #Week #
+         if len(week)>0:
+           #Month (for adjusting)
+           end_date = list(week['Date'])[0] + datetime.timedelta(days=21) # +2 weeks
+           start_date = list(week['Date'])[0] - datetime.timedelta(days=14) # -2 weeks
+
+        
+           # First 2 weeks of the year, add december data from previous year
+           if pd.to_datetime('2020-01-01')== list(week['Date'])[0] :
+               half=monitor[monitor["Date"]>='2020-12-18']
+               month=monitor[monitor["Date"]>='2020-01-01']
+               month=month[month['Date']<'2020-01-22']
+               half.rename(columns={"2020": "2009", "2019": "2020","2018":"2019","2017":"2018","2016":"2017","2015":"2016","2014":"2015","2013":"2014","2012":"2013","2011":"2012","2010":"2011","2009":'2010'}, inplace=True)
+               month = pd.concat((month, half), axis=0)
+               month=month.drop(['2009'],axis=1)
+           elif list(week['Date'])[0]==pd.to_datetime('2020-01-08'):
+               half=monitor[monitor["Date"]>'2020-12-24']
+               month=monitor[monitor["Date"]>='2020-01-01']
+               month=month[month['Date']<'2020-01-29'] 
+               half.rename(columns={"2020": "2009", "2019": "2020","2018":"2019","2017":"2018","2016":"2017","2015":"2016","2014":"2015","2013":"2014","2012":"2013","2011":"2012","2010":"2011",'2009':'2010'}, inplace=True)
+               month = pd.concat((month, half), axis=0)
+               month=month.drop(['2009'],axis=1)
+           else:
+               month=monitor[monitor["Date"]>=start_date]
+               month=month[month["Date"]<end_date]
+               month=month.drop(['2009'],axis=1)
+        
+           #if len(month.columns)==19:
+               #month=month.drop(['2009'],axis=1)
+           
+           Mnth=month.drop(['2020'], axis=1)
+           
+           #Change the 2020 data to only that particular week
+           month["2020"]=twenty
+           
+           #Dropping columns to get only historical data
+           months=month.drop(['2020'],axis=1)
+           months=months.drop(['Site'],axis=1)
+           months=months.drop(['State'],axis=1)
+           months=months.drop(['Longitude'],axis=1)          
+           months=months.drop(['Latitude'],axis=1)
+           months=months.drop(['Date'],axis=1)
+           months=months.drop(['ID'],axis=1)
+           months=months.drop(['County'],axis=1)
+           
+           #Filtering data, using years that have enough data
+           historical=months.dropna(thresh=0.75*len(months),axis=1)
+          # historical=months.dropna(axis=1,how='all')
+           #Finding median for each year
+           medians=np.nanmedian(historical,axis=0)
+           
+           #Finding iqr
+           IQR_melt = pd.melt(month.reset_index(), id_vars=['index'], value_vars=['2019', '2018', '2017'])
+           IQR_melt=IQR_melt.dropna()
+           IQR_melt.columns = ['index', 'year', 'value']
+           
+           #Finding slope of historical data
+           hist_slope=pd.DataFrame({"x":pd.to_numeric(historical.columns),"y":np.array(medians)})
+           x=hist_slope["x"]
+           y=hist_slope["y"]
+        
+           #Finding historical median
+           
+           Historical_melt = pd.melt(month.reset_index(), id_vars=['index'], value_vars=historical.columns)
+           Historical_melt.columns = ['index', 'year', 'value']
+           Iqr=pd.concat([adjusting['2019'],adjusting['2018'],adjusting['2017']],axis=1,sort=False)
+           Iqr = Iqr.dropna(thresh=0.75*len(Iqr), axis=1)
+
+
+                  
+                  #10 year median 
+           Med=np.nanmedian(Historical_melt['value'])  
+                  
+                  #Adjusting historical median with IDW slope
+           adjusted_med =  list(Slope1[idd])[weeknum-1] * (len(historical.columns)+1)/2 + Med
+
+                  #Calculating D value 
+           D_value=(np.nanmedian(month['2020'])-adjusted_med)/iqr(IQR_melt['value'])  
+                
+                  #Appending for output
+           List10.append([D_value,np.nanmedian(month['2020']),Med,adjusted_med,list(Slope1[idd])[weeknum-1],999,("Week "+str(weeknum)),state,idd,county,lat,lon])
+           slope.append(list(Slope1[idd])[weeknum-1])       
+
+                
+        slope=pd.DataFrame(slope)
+        
+        #Preparing for idw
+        
+        if slope.size>0:
+           slope.columns=[str(idd)]
+         
+
+        ot=pd.concat([ot,monitor],axis=0,sort=False)
+        slope1=pd.concat([slope1,slope],axis=1,sort=False)   
+        List10=pd.DataFrame(List10)
+        df=pd.concat([df, List10], axis=0, sort=False)      
+
+    #Concating for output
+       
+OT1=pd.concat([OT1,ot],axis=0,sort=False)
+DF1=pd.concat([DF1, df], axis=0, sort=False)
+Slope2=pd.concat([Slope2,slope1],axis=1,sort=False)
+    
+
+
+#Concat both outputs
+MapData=pd.concat([DF,DF1],axis=0,sort=False)
+MapData.columns=['Ratio','Median','Unadjusted','Expected','Slope','Rsquared','Week','state','ID','County','Latitude','Longitude']
+
+Map=MapData.dropna()
+ag = Map.groupby('ID')['Week'].nunique()
+Dta=pd.DataFrame()
+
+for i in range (0,len(ag.index)):
+    a=ag.index[i]
+    indexNames = MapData[ MapData['ID'] == a ].index
+    #using station that have at least 75% of the weeks
+    if ag.iloc[i]>28:
+      Dta=pd.concat([Dta,MapData[MapData['ID']==a]])
+Dta=Dta.dropna()
+Dta.drop_duplicates(subset=['Week', 'ID'], inplace=True, keep='first')
+Dta.to_csv(r"/Users/Bujin/Downloads/Ozone Map data non aggregated.csv", index = False)
+
